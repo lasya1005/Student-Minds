@@ -1,0 +1,11 @@
+# Ignore credentials and database files
+credentials.json
+*.db
+
+# Ignore CSV (optional, if not needed)
+*.csv
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
