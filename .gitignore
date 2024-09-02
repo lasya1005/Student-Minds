@@ -9,3 +9,4 @@ credentials.json
 __pycache__/
 *.pyc
 *.pyo
+"credentials.json" 
