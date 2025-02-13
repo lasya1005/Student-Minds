@@ -3,19 +3,27 @@ from tkinter import ttk, messagebox
 import sqlite3
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import os
+from google.oauth2.service_account import Credentials
 import re
+import json
+import os
 
 # Initialize SQLite database connection
 conn = sqlite3.connect('PlacementManagement.db')
 cursor = conn.cursor()
 
-# Google Sheets API setup using environment variable
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')  # Get the path to credentials.json from environment variable
-creds = ServiceAccountCredentials.from_json_keyfile_name(creds_json, scope)
+# Google Sheets API setup
+creds = Credentials.from_service_account_file("credentials.json", scopes=[
+    "https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"
+])
 client = gspread.authorize(creds)
 sheet = client.open('PlacementManagement').sheet1  # Ensure this name matches your Google Sheet
+
+# Load config file
+with open("config.json") as config_file:
+    config = json.load(config_file)
+
+spreadsheet_id = config["spreadsheet_id"]
 
 # Create table if not exists
 cursor.execute('''
@@ -32,24 +40,7 @@ CREATE TABLE IF NOT EXISTS PLACEMENT_MANAGEMENT (
 ''')
 conn.commit()
 
-# The rest of your functions and GUI setup goes here...
-
 # Helper functions
-def create_table():
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS PLACEMENT_MANAGEMENT (
-        STUDENT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-        NAME TEXT,
-        EMAIL TEXT,
-        ROLL_NO TEXT UNIQUE,
-        GENDER TEXT,
-        AGG TEXT,
-        PLACE TEXT,
-        PACK TEXT
-    )
-    ''')
-    conn.commit()
-
 def display_records():
     for record in tree.get_children():
         tree.delete(record)
@@ -106,12 +97,16 @@ def add_record():
     if not validate_fields(name, email, roll, agg, pack):
         return
 
-    cursor.execute('INSERT INTO PLACEMENT_MANAGEMENT (NAME, EMAIL, ROLL_NO, GENDER, AGG, PLACE, PACK) VALUES (?, ?, ?, ?, ?, ?, ?)', 
-                   (name, email, roll, gender, agg, place, pack))
-    conn.commit()
-    display_records()
-    export_to_google_sheets()
-    reset_fields()
+    try:
+        cursor.execute('INSERT INTO PLACEMENT_MANAGEMENT (NAME, EMAIL, ROLL_NO, GENDER, AGG, PLACE, PACK) VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                       (name, email, roll, gender, agg, place, pack))
+        conn.commit()
+        display_records()
+        export_to_google_sheets()
+        reset_fields()
+        messagebox.showinfo('Success', 'Record added successfully.')
+    except sqlite3.Error as e:
+        messagebox.showerror('Database Error', f"An error occurred: {e}")
 
 def remove_record():
     selected_item = tree.selection()
@@ -121,10 +116,14 @@ def remove_record():
     selected_record = tree.item(selected_item)
     student_id = selected_record['values'][0]
 
-    cursor.execute('DELETE FROM PLACEMENT_MANAGEMENT WHERE STUDENT_ID = ?', (student_id,))
-    conn.commit()
-    display_records()
-    export_to_google_sheets()
+    try:
+        cursor.execute('DELETE FROM PLACEMENT_MANAGEMENT WHERE STUDENT_ID = ?', (student_id,))
+        conn.commit()
+        display_records()
+        export_to_google_sheets()
+        messagebox.showinfo('Success', 'Record deleted successfully.')
+    except sqlite3.Error as e:
+        messagebox.showerror('Database Error', f"An error occurred: {e}")
 
 def update_record():
     selected_item = tree.selection()
@@ -132,10 +131,7 @@ def update_record():
         messagebox.showerror('Error', 'Please select a record to update.')
         return
 
-    # Get the original roll number from the selected record
-    original_roll = tree.item(selected_item)['values'][3]  # Assuming 'Roll No' is the 4th column
-
-    # Get updated values from the input fields
+    original_roll = tree.item(selected_item)['values'][3]
     name = name_strvar.get()
     email = email_strvar.get()
     new_roll = roll_strvar.get()
@@ -144,27 +140,25 @@ def update_record():
     place = place_strvar.get()
     pack = pack_strvar.get()
 
-    # Check if the roll number has changed
     if new_roll != original_roll:
-        # If the roll number was changed, check if the new roll number is unique
         cursor.execute('SELECT * FROM PLACEMENT_MANAGEMENT WHERE ROLL_NO = ? AND STUDENT_ID != ?', (new_roll, tree.item(selected_item)['values'][0]))
         if cursor.fetchone():
             messagebox.showerror('Error', 'Roll number must be unique.')
             return
 
-    # Update the record in the database
-    student_id = tree.item(selected_item)['values'][0]
-    cursor.execute('''
-        UPDATE PLACEMENT_MANAGEMENT 
-        SET NAME = ?, EMAIL = ?, ROLL_NO = ?, GENDER = ?, AGG = ?, PLACE = ?, PACK = ? 
-        WHERE STUDENT_ID = ?
-    ''', (name, email, new_roll, gender, agg, place, pack, student_id))
-    conn.commit()
-
-    # Refresh the display
-    display_records()
-    export_to_google_sheets()
-    messagebox.showinfo('Success', 'Record updated successfully.')
+    try:
+        student_id = tree.item(selected_item)['values'][0]
+        cursor.execute('''
+            UPDATE PLACEMENT_MANAGEMENT 
+            SET NAME = ?, EMAIL = ?, ROLL_NO = ?, GENDER = ?, AGG = ?, PLACE = ?, PACK = ? 
+            WHERE STUDENT_ID = ?
+        ''', (name, email, new_roll, gender, agg, place, pack, student_id))
+        conn.commit()
+        display_records()
+        export_to_google_sheets()
+        messagebox.showinfo('Success', 'Record updated successfully.')
+    except sqlite3.Error as e:
+        messagebox.showerror('Database Error', f"An error occurred: {e}")
 
 def search_records():
     roll_number = roll_search_strvar.get()
@@ -180,12 +174,15 @@ def search_records():
         tree.insert('', 'end', values=record)
 
 def export_to_google_sheets():
-    cursor.execute('SELECT * FROM PLACEMENT_MANAGEMENT')
-    records = cursor.fetchall()
-    sheet.clear()
-    sheet.append_row(['Student ID', 'Name', 'Email', 'Roll No', 'Gender', 'Aggregate', 'Placement', 'Package'])
-    for record in records:
-        sheet.append_row(record)
+    try:
+        cursor.execute('SELECT * FROM PLACEMENT_MANAGEMENT')
+        records = cursor.fetchall()
+        sheet.clear()
+        sheet.append_row(['Student ID', 'Name', 'Email', 'Roll No', 'Gender', 'Aggregate', 'Placement', 'Package'])
+        for record in records:
+            sheet.append_row(record)
+    except Exception as e:
+        messagebox.showerror('Error', f"Google Sheets update failed: {e}")
 
 def reset_fields():
     name_strvar.set('')
@@ -304,10 +301,14 @@ tree.column('Package', width=100)
 tree.pack(fill=tk.BOTH, expand=True)
 tree.bind('<<TreeviewSelect>>', populate_fields)
 
+# Close the database connection properly when window is closed
+def on_closing():
+    conn.close()
+    main.destroy()
+
+main.protocol("WM_DELETE_WINDOW", on_closing)
+
 # Initial population of records
 display_records()
 
 main.mainloop()
-
-# Close the database connection
-conn.close()

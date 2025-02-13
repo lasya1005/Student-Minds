@@ -1,12 +1,8 @@
-# Ignore credentials and database files
+# Ignore credentials file
 credentials.json
-*.db
 
-# Ignore CSV (optional, if not needed)
-*.csv
-
-# Python cache
+# Ignore Python cache and virtual environment
 __pycache__/
 *.pyc
-*.pyo
-"credentials.json" 
+venv/
+.env
